@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { Eye, EyeOff, Plus, Edit2, Trash2, LogOut, Lock, Copy, Check, Briefcase, User, X, Search, ChevronRight } from 'lucide-react';
+import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { Eye, EyeOff, Plus, Edit2, Trash2, LogOut, Lock, Copy, Check, Briefcase, User, X, Search, ChevronRight, GripVertical } from 'lucide-react';
 
 // --- Firebase Initialization ---
 const firebaseConfig = {
@@ -34,6 +34,8 @@ const App = () => {
   const [copiedField, setCopiedField] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
   
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  
   const initialFormState = {
     serviceName: '',
     category: '個人用',
@@ -47,13 +49,11 @@ const App = () => {
 
   // --- Dynamic Font & Style Injection ---
   useEffect(() => {
-    // Load Roboto & Noto Sans JP from Google Fonts
     const link = document.createElement('link');
     link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap';
     link.rel = 'stylesheet';
     document.head.appendChild(link);
 
-    // Apply strict font-family settings
     const style = document.createElement('style');
     style.innerHTML = `
       body, input, select, textarea, button {
@@ -95,7 +95,13 @@ const App = () => {
     const passwordsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'passwords');
     const unsubscribe = onSnapshot(passwordsRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      data.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      // sortOrderの昇順、無ければcreatedAtの降順
+      data.sort((a, b) => {
+        if (a.sortOrder !== undefined && b.sortOrder !== undefined) {
+          return a.sortOrder - b.sortOrder;
+        }
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
       setPasswords(data);
     }, (error) => {
       console.error(error);
@@ -126,7 +132,6 @@ const App = () => {
 
   const handleLogout = async () => { try { await signOut(auth); } catch (error) { console.error(error); } };
 
-  // --- Open Add/Edit Modal ---
   const handleOpenModal = (passwordData = null) => {
     if (passwordData) {
       setFormData(passwordData);
@@ -146,11 +151,9 @@ const App = () => {
     setIsNewCategoryInput(false);
   };
 
-  // --- Detail Popup (Modal) Handlers ---
   const handleOpenDetailModal = (item) => {
     setSelectedItem(item);
     setIsDetailModalOpen(true);
-    // Reset individual password eye icons
     setShowPasswordMap({});
   };
 
@@ -161,14 +164,14 @@ const App = () => {
 
   const handleEditFromDetail = () => {
     if (!selectedItem) return;
-    // Copy selectedItem's data into form data to edit
     setFormData({
       serviceName: selectedItem.serviceName || '',
       category: selectedItem.category || '個人用',
       loginId: selectedItem.loginId || '',
       password: selectedItem.password || '',
       memo: selectedItem.memo || '',
-      customFields: selectedItem.customFields ? [...selectedItem.customFields] : []
+      customFields: selectedItem.customFields ? [...selectedItem.customFields] : [],
+      sortOrder: selectedItem.sortOrder !== undefined ? selectedItem.sortOrder : passwords.length
     });
     setEditingId(selectedItem.id);
     setIsDetailModalOpen(false);
@@ -221,15 +224,53 @@ const App = () => {
       if (editingId) {
         const updatedItem = { ...formData, updatedAt: now };
         await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'passwords', editingId), updatedItem);
-        // If we are currently showing details of the item we edited, update it live
         if (selectedItem && selectedItem.id === editingId) {
           setSelectedItem({ id: editingId, ...updatedItem });
         }
       } else {
-        await addDoc(passwordsRef, { ...formData, createdAt: now, updatedAt: now });
+        // 新規追加時はリストの最後に配置
+        const nextOrder = passwords.length > 0 ? Math.max(...passwords.map(p => p.sortOrder || 0)) + 1 : 0;
+        await addDoc(passwordsRef, { ...formData, createdAt: now, updatedAt: now, sortOrder: nextOrder });
       }
       handleCloseModal();
     } catch (error) { showError("保存に失敗しました。"); }
+  };
+
+  // --- Drag and Drop Logic ---
+  const handleDragStart = (index) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+
+    // 現在表示されているフィルター済みの配列を元に並び替えをシミュレート
+    const newFiltered = [...filteredPasswords];
+    const draggedItem = newFiltered[draggedIndex];
+    newFiltered.splice(draggedIndex, 1);
+    newFiltered.splice(index, 0, draggedItem);
+    
+    setDraggedIndex(index);
+    setFilteredPasswords(newFiltered);
+  };
+
+  const handleDragEnd = async () => {
+    setDraggedIndex(null);
+    if (!user) return;
+
+    // 並び替えられた現在の画面表示順を元に、全体のsortOrderを確定して一括アップデート
+    try {
+      const batch = writeBatch(db);
+      filteredPasswords.forEach((item, index) => {
+        const itemRef = doc(db, 'artifacts', appId, 'users', user.uid, 'passwords', item.id);
+        batch.update(itemRef, { sortOrder: index });
+      });
+      await batch.commit();
+    } catch (error) {
+      console.error(error);
+      showError("並び順の保存に失敗しました。");
+    }
   };
 
   const togglePasswordVisibility = (id) => setShowPasswordMap(prev => ({ ...prev, [id]: !prev[id] }));
@@ -265,7 +306,6 @@ const App = () => {
     }
   };
 
-  // --- Login Screen ---
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
@@ -289,7 +329,6 @@ const App = () => {
     );
   }
 
-  // --- Authenticated Dashboard ---
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800 pb-24">
       {errorMessage && (
@@ -318,8 +357,8 @@ const App = () => {
       {/* Main Content */}
       <main className="max-w-4xl mx-auto px-4 py-6">
         {/* Search & Category Filter */}
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-          <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+          <div className="flex gap-2 overflow-x-auto pb-1 md:pb-0 w-full md:w-auto" style={{ scrollbarWidth: 'none' }}>
             <button onClick={() => setFilterCategory('all')} className={`flex-shrink-0 px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${filterCategory === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>すべて</button>
             {allCategories.map(cat => (
               <button key={cat} onClick={() => setFilterCategory(cat)} className={`flex-shrink-0 px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${filterCategory === cat ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{cat}</button>
@@ -331,7 +370,7 @@ const App = () => {
           </div>
         </div>
 
-        {/* Password List */}
+        {/* Compact Password List with Drag & Drop */}
         {filteredPasswords.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-xl border border-gray-200">
             <Lock className="mx-auto text-gray-300 mb-4" size={48} />
@@ -339,24 +378,36 @@ const App = () => {
           </div>
         ) : (
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden divide-y divide-gray-100">
-            {filteredPasswords.map(item => (
+            {filteredPasswords.map((item, index) => (
               <div 
                 key={item.id} 
-                className="px-4 py-4 flex items-center justify-between hover:bg-blue-50/20 active:bg-blue-50/50 cursor-pointer transition-colors"
-                onClick={() => handleOpenDetailModal(item)}
+                draggable
+                onDragStart={() => handleDragStart(index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragEnd={handleDragEnd}
+                className={`px-3 py-1.5 flex items-center gap-2 hover:bg-blue-50/20 active:bg-blue-50/40 transition-colors bg-white ${draggedIndex === index ? 'opacity-40 bg-gray-50' : ''}`}
               >
-                <div className="flex items-center justify-between w-full gap-4">
+                {/* Drag Handle Icon */}
+                <div className="text-gray-300 hover:text-gray-500 cursor-get cursor-grab active:cursor-grabbing p-1">
+                  <GripVertical size={16} />
+                </div>
+
+                <div 
+                  className="flex items-center justify-between w-full gap-4 cursor-pointer min-w-0"
+                  onClick={() => handleOpenDetailModal(item)}
+                >
+                  {/* Service Name (55%) */}
                   <div className="w-[55%] min-w-0">
                     <div className="text-[16px] font-medium text-gray-900 truncate">
                       {item.serviceName}
                     </div>
                   </div>
-                  <div className="w-[45%] min-w-0 text-right flex items-center justify-end gap-2">
-                    {/* font-monoを削除し、指定のRobotoが適用されるように修正 */}
+                  {/* ID (45%) */}
+                  <div className="w-[45%] min-w-0 text-right flex items-center justify-end gap-1.5">
                     <div className="text-[14px] font-medium text-gray-400 truncate max-w-[90%]">
                       {item.loginId || '未設定'}
                     </div>
-                    <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+                    <ChevronRight size={14} className="text-gray-300 flex-shrink-0" />
                   </div>
                 </div>
               </div>
@@ -384,7 +435,6 @@ const App = () => {
               <div className="space-y-1.5">
                 <label className="text-[14px] font-medium text-gray-400">ID / メールアドレス</label>
                 <div className="flex items-center justify-between bg-gray-50 px-3 py-2.5 rounded-xl border border-gray-100">
-                  {/* font-monoを削除 */}
                   <span className="text-[16px] font-medium text-gray-800 truncate select-all pr-2">{selectedItem.loginId || '未設定'}</span>
                   {selectedItem.loginId && (
                     <button onClick={() => copyToClipboard(selectedItem.loginId, `detail-id`)} className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-white rounded-lg transition-all">
@@ -544,7 +594,6 @@ const App = () => {
                 </div>
                 <div>
                   <label className="block text-[14px] font-medium text-gray-700 mb-1">ID / メールアドレス</label>
-                  {/* font-monoを削除 */}
                   <input type="text" name="loginId" value={formData.loginId} onChange={handleChange} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium" />
                 </div>
                 <div>
