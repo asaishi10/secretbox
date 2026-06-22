@@ -271,11 +271,8 @@ const App = () => {
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-gray-100">
           <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6"><Lock size={32} /></div>
-          {/* 見出し 2L (32px), Bold */}
           <h1 className="text-[32px] font-bold text-gray-900 mb-2 leading-tight">SecretBox</h1>
-          {/* 本文 L (18px), Medium */}
           <p className="text-[18px] font-medium text-gray-500 mb-8">安全にIDとパスワードを保管・共有</p>
-          {/* 本文 S (14px), Medium */}
           <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-6 py-3.5 rounded-xl text-[14px] font-medium transition-colors shadow-sm">
             <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
               <g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)">
@@ -306,13 +303,11 @@ const App = () => {
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2 text-blue-600">
             <Lock size={24} />
-            {/* 見出し S (20px), Bold */}
             <h1 className="text-[20px] font-bold text-gray-900 tracking-tight">SecretBox</h1>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.email}`} alt="user" className="w-8 h-8 rounded-full border" />
-              {/* 本文 S (14px), Medium */}
               <span className="hidden md:inline text-[14px] font-medium text-gray-600">{user.email}</span>
             </div>
             <button onClick={handleLogout} className="text-gray-400 hover:text-red-600 p-2 transition-colors"><LogOut size={20} /></button>
@@ -325,7 +320,6 @@ const App = () => {
         {/* Search & Category Filter */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto" style={{ scrollbarWidth: 'none' }}>
-            {/* 本文 S (14px), Medium */}
             <button onClick={() => setFilterCategory('all')} className={`flex-shrink-0 px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${filterCategory === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>すべて</button>
             {allCategories.map(cat => (
               <button key={cat} onClick={() => setFilterCategory(cat)} className={`flex-shrink-0 px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${filterCategory === cat ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{cat}</button>
@@ -333,16 +327,14 @@ const App = () => {
           </div>
           <div className="relative w-full md:w-72">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
-            {/* 本文 S (14px), Medium */}
             <input type="text" placeholder="サービス名やIDで検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 text-[14px] font-medium rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all bg-white" />
           </div>
         </div>
 
-        {/* Password List with Border Division (罫線仕切り) */}
+        {/* Password List */}
         {filteredPasswords.length === 0 ? (
           <div className="text-center py-20 bg-white rounded-xl border border-gray-200">
             <Lock className="mx-auto text-gray-300 mb-4" size={48} />
-            {/* 本文 M (16px), Medium */}
             <p className="text-gray-400 text-[16px] font-medium">登録されているパスワードはありません</p>
           </div>
         ) : (
@@ -354,17 +346,14 @@ const App = () => {
                 onClick={() => handleOpenDetailModal(item)}
               >
                 <div className="flex items-center justify-between w-full gap-4">
-                  {/* Service Name: Takes up 55% of the space, fully dynamic, strictly 1 line */}
                   <div className="w-[55%] min-w-0">
-                    {/* 本文 M (16px), Medium */}
                     <div className="text-[16px] font-medium text-gray-900 truncate">
                       {item.serviceName}
                     </div>
                   </div>
-                  {/* ID: Takes up 45% of the space, aligns right, strictly 1 line */}
                   <div className="w-[45%] min-w-0 text-right flex items-center justify-end gap-2">
-                    {/* 本文 S (14px), Medium */}
-                    <div className="text-[14px] font-medium text-gray-400 truncate max-w-[90%] font-mono">
+                    {/* font-monoを削除し、指定のRobotoが適用されるように修正 */}
+                    <div className="text-[14px] font-medium text-gray-400 truncate max-w-[90%]">
                       {item.loginId || '未設定'}
                     </div>
                     <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
@@ -383,25 +372,20 @@ const App = () => {
       {isDetailModalOpen && selectedItem && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-40">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
-            {/* Header */}
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-t-2xl">
               <div className="flex items-center gap-2 min-w-0 pr-4">
-                {/* 見出し M (24px), Bold */}
                 <h2 className="text-[24px] font-bold text-gray-900 truncate">{selectedItem.serviceName}</h2>
                 <span className="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100 font-medium flex-shrink-0">{selectedItem.category}</span>
               </div>
               <button onClick={handleCloseDetailModal} className="text-gray-400 hover:text-gray-600 transition-colors p-1"><X size={24} /></button>
             </div>
             
-            {/* Scrollable Content */}
             <div className="p-6 overflow-y-auto space-y-5">
-              {/* ID / Login Field */}
               <div className="space-y-1.5">
-                {/* 本文 S (14px), Medium (Label) */}
                 <label className="text-[14px] font-medium text-gray-400">ID / メールアドレス</label>
                 <div className="flex items-center justify-between bg-gray-50 px-3 py-2.5 rounded-xl border border-gray-100">
-                  {/* 本文 M (16px), Medium */}
-                  <span className="text-[16px] font-medium text-gray-800 truncate font-mono select-all pr-2">{selectedItem.loginId || '未設定'}</span>
+                  {/* font-monoを削除 */}
+                  <span className="text-[16px] font-medium text-gray-800 truncate select-all pr-2">{selectedItem.loginId || '未設定'}</span>
                   {selectedItem.loginId && (
                     <button onClick={() => copyToClipboard(selectedItem.loginId, `detail-id`)} className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-white rounded-lg transition-all">
                       {copiedField === `detail-id` ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
@@ -410,12 +394,9 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Password Field */}
               <div className="space-y-1.5">
-                {/* 本文 S (14px), Medium */}
                 <label className="text-[14px] font-medium text-gray-400">パスワード</label>
                 <div className="flex items-center justify-between bg-gray-50 px-3 py-2.5 rounded-xl border border-gray-100">
-                  {/* 本文 M (16px), Medium */}
                   <input 
                     type={showPasswordMap['detail-pass'] ? "text" : "password"} 
                     value={selectedItem.password || ''} 
@@ -435,7 +416,6 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Custom Fields */}
               {selectedItem.customFields && selectedItem.customFields.length > 0 && (
                 <div className="space-y-4 pt-3 border-t border-gray-100">
                   <h3 className="text-[14px] font-bold text-gray-800">追加情報</h3>
@@ -473,7 +453,6 @@ const App = () => {
                 </div>
               )}
 
-              {/* Memo */}
               {selectedItem.memo && (
                 <div className="space-y-1.5 pt-3 border-t border-gray-100">
                   <label className="text-[14px] font-medium text-gray-400">メモ</label>
@@ -482,17 +461,13 @@ const App = () => {
               )}
             </div>
 
-            {/* Footer containing Edit, Delete, Close */}
             <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex justify-between items-center">
-              {/* Delete Trigger Button (Left) */}
               <button 
                 onClick={handleDeleteTrigger} 
                 className="flex items-center gap-1.5 px-4 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl text-[14px] font-medium transition-colors"
               >
                 <Trash2 size={16} />削除
               </button>
-
-              {/* Edit and Close Buttons (Right) */}
               <div className="flex items-center gap-2">
                 <button 
                   onClick={handleCloseDetailModal} 
@@ -569,7 +544,8 @@ const App = () => {
                 </div>
                 <div>
                   <label className="block text-[14px] font-medium text-gray-700 mb-1">ID / メールアドレス</label>
-                  <input type="text" name="loginId" value={formData.loginId} onChange={handleChange} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium font-mono" />
+                  {/* font-monoを削除 */}
+                  <input type="text" name="loginId" value={formData.loginId} onChange={handleChange} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium" />
                 </div>
                 <div>
                   <label className="block text-[14px] font-medium text-gray-700 mb-1">パスワード</label>
@@ -579,7 +555,6 @@ const App = () => {
                   </div>
                 </div>
 
-                {/* Custom Fields Implementation */}
                 <div className="space-y-2 pt-3 border-t border-gray-100">
                   <div className="flex justify-between items-center">
                     <label className="text-[14px] font-bold text-gray-800">追加項目</label>
