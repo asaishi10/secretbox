@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { Eye, EyeOff, Plus, Edit2, Trash2, LogOut, Lock, Copy, Check, Briefcase, User, X, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { Eye, EyeOff, Plus, Edit2, Trash2, LogOut, Lock, Copy, Check, Briefcase, User, X, Search, ChevronRight } from 'lucide-react';
 
 // --- Firebase Initialization ---
 const firebaseConfig = {
@@ -23,7 +23,11 @@ const App = () => {
   const [passwords, setPasswords] = useState([]);
   const [filteredPasswords, setFilteredPasswords] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  
   const [editingId, setEditingId] = useState(null);
+  const [selectedItem, setSelectedItem] = useState(null);
   const [filterCategory, setFilterCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showPasswordMap, setShowPasswordMap] = useState({});
@@ -40,7 +44,29 @@ const App = () => {
   };
   const [formData, setFormData] = useState(initialFormState);
   const [isNewCategoryInput, setIsNewCategoryInput] = useState(false);
-  const [expandedIds, setExpandedIds] = useState({});
+
+  // --- Dynamic Font & Style Injection ---
+  useEffect(() => {
+    // Load Roboto & Noto Sans JP from Google Fonts
+    const link = document.createElement('link');
+    link.href = 'https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Roboto:wght@400;500;700&display=swap';
+    link.rel = 'stylesheet';
+    document.head.appendChild(link);
+
+    // Apply strict font-family settings
+    const style = document.createElement('style');
+    style.innerHTML = `
+      body, input, select, textarea, button {
+        font-family: 'Roboto', 'Noto Sans JP', sans-serif !important;
+      }
+    `;
+    document.head.appendChild(style);
+
+    return () => {
+      document.head.removeChild(link);
+      document.head.removeChild(style);
+    };
+  }, []);
 
   useEffect(() => {
     const initAuth = async () => {
@@ -55,7 +81,11 @@ const App = () => {
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      if (!currentUser) setPasswords([]);
+      if (!currentUser) {
+        setPasswords([]);
+        setSelectedItem(null);
+        setIsDetailModalOpen(false);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -96,6 +126,7 @@ const App = () => {
 
   const handleLogout = async () => { try { await signOut(auth); } catch (error) { console.error(error); } };
 
+  // --- Open Add/Edit Modal ---
   const handleOpenModal = (passwordData = null) => {
     if (passwordData) {
       setFormData(passwordData);
@@ -115,9 +146,55 @@ const App = () => {
     setIsNewCategoryInput(false);
   };
 
+  // --- Detail Popup (Modal) Handlers ---
+  const handleOpenDetailModal = (item) => {
+    setSelectedItem(item);
+    setIsDetailModalOpen(true);
+    // Reset individual password eye icons
+    setShowPasswordMap({});
+  };
+
+  const handleCloseDetailModal = () => {
+    setIsDetailModalOpen(false);
+    setSelectedItem(null);
+  };
+
+  const handleEditFromDetail = () => {
+    if (!selectedItem) return;
+    // Copy selectedItem's data into form data to edit
+    setFormData({
+      serviceName: selectedItem.serviceName || '',
+      category: selectedItem.category || '個人用',
+      loginId: selectedItem.loginId || '',
+      password: selectedItem.password || '',
+      memo: selectedItem.memo || '',
+      customFields: selectedItem.customFields ? [...selectedItem.customFields] : []
+    });
+    setEditingId(selectedItem.id);
+    setIsDetailModalOpen(false);
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteTrigger = () => {
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!user || !selectedItem) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'passwords', selectedItem.id));
+      setIsDeleteConfirmOpen(false);
+      setIsDetailModalOpen(false);
+      setSelectedItem(null);
+    } catch (error) {
+      showError("削除に失敗しました。");
+    }
+  };
+
   const handleChange = (e) => setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
 
   const handleAddCustomField = () => setFormData(prev => ({ ...prev, customFields: [...(prev.customFields || []), { label: '', value: '', isSecret: false }] }));
+  
   const handleCustomFieldChange = (index, field, value) => {
     setFormData(prev => {
       const newFields = [...(prev.customFields || [])];
@@ -125,6 +202,7 @@ const App = () => {
       return { ...prev, customFields: newFields };
     });
   };
+
   const handleRemoveCustomField = (index) => {
     setFormData(prev => {
       const newFields = [...(prev.customFields || [])];
@@ -132,8 +210,6 @@ const App = () => {
       return { ...prev, customFields: newFields };
     });
   };
-
-  const toggleExpand = (id) => setExpandedIds(prev => ({ ...prev, [id]: !prev[id] }));
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -143,20 +219,17 @@ const App = () => {
     const now = Date.now();
     try {
       if (editingId) {
-        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'passwords', editingId), { ...formData, updatedAt: now });
+        const updatedItem = { ...formData, updatedAt: now };
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'passwords', editingId), updatedItem);
+        // If we are currently showing details of the item we edited, update it live
+        if (selectedItem && selectedItem.id === editingId) {
+          setSelectedItem({ id: editingId, ...updatedItem });
+        }
       } else {
         await addDoc(passwordsRef, { ...formData, createdAt: now, updatedAt: now });
       }
       handleCloseModal();
     } catch (error) { showError("保存に失敗しました。"); }
-  };
-
-  const handleDelete = async (id) => {
-    if (!user) return;
-    if (window.confirm("削除してよろしいですか？")) {
-       try { await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'passwords', id)); } 
-       catch (error) { showError("削除に失敗しました。"); }
-    }
   };
 
   const togglePasswordVisibility = (id) => setShowPasswordMap(prev => ({ ...prev, [id]: !prev[id] }));
@@ -192,14 +265,18 @@ const App = () => {
     }
   };
 
+  // --- Login Screen ---
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col justify-center items-center p-4">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center border border-gray-100">
           <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6"><Lock size={32} /></div>
-          <h1 className="text-2xl font-bold text-gray-800 mb-2">SecretBox</h1>
-          <p className="text-gray-500 mb-8">安全にIDとパスワードを保管・共有</p>
-          <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-6 py-3 rounded-lg font-medium transition-colors shadow-sm">
+          {/* 見出し 2L (32px), Bold */}
+          <h1 className="text-[32px] font-bold text-gray-900 mb-2 leading-tight">SecretBox</h1>
+          {/* 本文 L (18px), Medium */}
+          <p className="text-[18px] font-medium text-gray-500 mb-8">安全にIDとパスワードを保管・共有</p>
+          {/* 本文 S (14px), Medium */}
+          <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-6 py-3.5 rounded-xl text-[14px] font-medium transition-colors shadow-sm">
             <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
               <g transform="matrix(1, 0, 0, 1, 27.009001, -39.238998)">
                 <path fill="#4285F4" d="M -3.264 51.509 C -3.264 50.719 -3.334 49.969 -3.454 49.239 L -14.754 49.239 L -14.754 53.749 L -8.284 53.749 C -8.574 55.229 -9.424 56.479 -10.684 57.329 L -10.684 60.329 L -6.824 60.329 C -4.564 58.239 -3.264 55.159 -3.264 51.509 Z"/>
@@ -215,173 +292,330 @@ const App = () => {
     );
   }
 
+  // --- Authenticated Dashboard ---
   return (
-    <div className="min-h-screen bg-gray-100 font-sans text-gray-800 pb-20 md:pb-8">
+    <div className="min-h-screen bg-gray-50 text-gray-800 pb-24">
       {errorMessage && (
-        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2">
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-full shadow-lg flex items-center gap-2 text-[14px] font-medium">
           <span>{errorMessage}</span><button onClick={() => setErrorMessage('')}><X size={16} /></button>
         </div>
       )}
 
-      <header className="bg-white border-b sticky top-0 z-30 shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-blue-600"><Lock size={24} /><h1 className="text-xl font-bold hidden sm:block">SecretBox</h1></div>
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
+        <div className="max-w-4xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-blue-600">
+            <Lock size={24} />
+            {/* 見出し S (20px), Bold */}
+            <h1 className="text-[20px] font-bold text-gray-900 tracking-tight">SecretBox</h1>
+          </div>
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
+            <div className="flex items-center gap-2">
               <img src={user.photoURL || `https://ui-avatars.com/api/?name=${user.email}`} alt="user" className="w-8 h-8 rounded-full border" />
-              <span className="hidden md:inline">{user.email}</span>
+              {/* 本文 S (14px), Medium */}
+              <span className="hidden md:inline text-[14px] font-medium text-gray-600">{user.email}</span>
             </div>
-            <button onClick={handleLogout} className="text-gray-500 hover:text-red-600 p-2"><LogOut size={20} /></button>
+            <button onClick={handleLogout} className="text-gray-400 hover:text-red-600 p-2 transition-colors"><LogOut size={20} /></button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+      {/* Main Content */}
+      <main className="max-w-4xl mx-auto px-4 py-6">
+        {/* Search & Category Filter */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto" style={{ scrollbarWidth: 'none' }}>
-            <button onClick={() => setFilterCategory('all')} className={`flex-shrink-0 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filterCategory === 'all' ? 'bg-blue-100 text-blue-700' : 'bg-white border text-gray-600'}`}>すべて</button>
+            {/* 本文 S (14px), Medium */}
+            <button onClick={() => setFilterCategory('all')} className={`flex-shrink-0 px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${filterCategory === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>すべて</button>
             {allCategories.map(cat => (
-              <button key={cat} onClick={() => setFilterCategory(cat)} className={`flex-shrink-0 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${filterCategory === cat ? 'bg-blue-100 text-blue-700' : 'bg-white border text-gray-600'}`}>{cat}</button>
+              <button key={cat} onClick={() => setFilterCategory(cat)} className={`flex-shrink-0 px-4 py-2 rounded-lg text-[14px] font-medium transition-all ${filterCategory === cat ? 'bg-blue-600 text-white shadow-sm' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'}`}>{cat}</button>
             ))}
           </div>
-          <div className="relative w-full md:w-64">
+          <div className="relative w-full md:w-72">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={16} />
-            <input type="text" placeholder="検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-1.5 text-sm rounded-lg border focus:ring-2 focus:ring-blue-500 outline-none" />
+            {/* 本文 S (14px), Medium */}
+            <input type="text" placeholder="サービス名やIDで検索..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-10 pr-4 py-2 text-[14px] font-medium rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition-all bg-white" />
           </div>
         </div>
 
+        {/* Password List with Border Division (罫線仕切り) */}
         {filteredPasswords.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-300"><Lock className="mx-auto text-gray-300 mb-4" size={48} /><p className="text-gray-500 text-sm">登録情報はありません。</p></div>
+          <div className="text-center py-20 bg-white rounded-xl border border-gray-200">
+            <Lock className="mx-auto text-gray-300 mb-4" size={48} />
+            {/* 本文 M (16px), Medium */}
+            <p className="text-gray-400 text-[16px] font-medium">登録されているパスワードはありません</p>
+          </div>
         ) : (
-          <div className="flex flex-col gap-2">
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden divide-y divide-gray-100">
             {filteredPasswords.map(item => (
-              <div key={item.id} className="bg-white rounded-lg shadow-sm border overflow-hidden">
-                <div className="px-3 py-2.5 flex flex-col md:flex-row md:items-center justify-between gap-2 cursor-pointer hover:bg-gray-50" onClick={() => toggleExpand(item.id)}>
-                  <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                    <div className="flex items-center gap-2 w-1/3 min-w-[140px] max-w-[200px]">
-                      <h3 className="font-semibold text-sm truncate">{item.serviceName}</h3>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 border whitespace-nowrap">{item.category}</span>
-                    </div>
-                    <div className="hidden md:flex flex-1 items-center gap-3 text-xs text-gray-500">
-                       <span className="truncate w-1/2">{item.loginId || '-'}</span>
-                       <span className="w-1/2">{item.password ? '••••••••' : '-'}</span>
+              <div 
+                key={item.id} 
+                className="px-4 py-4 flex items-center justify-between hover:bg-blue-50/20 active:bg-blue-50/50 cursor-pointer transition-colors"
+                onClick={() => handleOpenDetailModal(item)}
+              >
+                <div className="flex items-center justify-between w-full gap-4">
+                  {/* Service Name: Takes up 55% of the space, fully dynamic, strictly 1 line */}
+                  <div className="w-[55%] min-w-0">
+                    {/* 本文 M (16px), Medium */}
+                    <div className="text-[16px] font-medium text-gray-900 truncate">
+                      {item.serviceName}
                     </div>
                   </div>
-                  <div className="flex items-center justify-between md:justify-end gap-2 md:w-28">
-                    <div className="flex gap-0.5" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => handleOpenModal(item)} className="p-1.5 text-gray-400 hover:text-blue-600 rounded"><Edit2 size={14}/></button>
-                      <button onClick={() => handleDelete(item.id)} className="p-1.5 text-gray-400 hover:text-red-600 rounded"><Trash2 size={14}/></button>
+                  {/* ID: Takes up 45% of the space, aligns right, strictly 1 line */}
+                  <div className="w-[45%] min-w-0 text-right flex items-center justify-end gap-2">
+                    {/* 本文 S (14px), Medium */}
+                    <div className="text-[14px] font-medium text-gray-400 truncate max-w-[90%] font-mono">
+                      {item.loginId || '未設定'}
                     </div>
-                    <div className="text-gray-400 ml-1">{expandedIds[item.id] ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</div>
+                    <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
                   </div>
                 </div>
-                
-                {expandedIds[item.id] && (
-                  <div className="p-3 border-t bg-gray-50/50 space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-[11px] text-gray-500 font-semibold mb-0.5 block">ID / メールアドレス</label>
-                        <div className="flex items-center justify-between bg-white px-2 py-1.5 rounded border">
-                          <span className="text-sm font-mono truncate mr-2">{item.loginId || '-'}</span>
-                          {item.loginId && <button onClick={() => copyToClipboard(item.loginId, `id-${item.id}`)} className="text-gray-400 hover:text-blue-600 p-1">{copiedField === `id-${item.id}` ? <Check size={14} className="text-green-500"/> : <Copy size={14}/>}</button>}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-[11px] text-gray-500 font-semibold mb-0.5 block">パスワード</label>
-                        <div className="flex items-center gap-2 bg-white px-2 py-1.5 rounded border">
-                          <input type={showPasswordMap[item.id] ? "text" : "password"} value={item.password || ''} readOnly className="w-full bg-transparent text-sm font-mono outline-none" />
-                          {item.password && (
-                            <div className="flex items-center border-l pl-1 gap-0.5">
-                              <button onClick={() => togglePasswordVisibility(item.id)} className="text-gray-400 hover:text-gray-600 p-1">{showPasswordMap[item.id] ? <EyeOff size={14}/> : <Eye size={14}/>}</button>
-                              <button onClick={() => copyToClipboard(item.password, `pass-${item.id}`)} className="text-gray-400 hover:text-blue-600 p-1">{copiedField === `pass-${item.id}` ? <Check size={14} className="text-green-500"/> : <Copy size={14}/>}</button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {item.customFields && item.customFields.length > 0 && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {item.customFields.map((field, idx) => (
-                          <div key={idx}>
-                            <label className="text-[11px] text-gray-500 font-semibold mb-0.5 block">{field.label || 'カスタム項目'}</label>
-                            <div className="flex items-center justify-between bg-white px-2 py-1.5 rounded border">
-                              {field.isSecret ? (
-                                <input type={showPasswordMap[`${item.id}-custom-${idx}`] ? "text" : "password"} value={field.value || ''} readOnly className="flex-1 bg-transparent text-sm font-mono outline-none mr-2" />
-                              ) : <span className="text-sm truncate mr-2">{field.value || '-'}</span>}
-                              {field.value && (
-                                <div className="flex items-center border-l pl-1 gap-0.5">
-                                  {field.isSecret && <button onClick={() => togglePasswordVisibility(`${item.id}-custom-${idx}`)} className="text-gray-400 hover:text-gray-600 p-1">{showPasswordMap[`${item.id}-custom-${idx}`] ? <EyeOff size={14}/> : <Eye size={14}/>}</button>}
-                                  <button onClick={() => copyToClipboard(field.value, `custom-${item.id}-${idx}`)} className="text-gray-400 hover:text-blue-600 p-1">{copiedField === `custom-${item.id}-${idx}` ? <Check size={14} className="text-green-500"/> : <Copy size={14}/>}</button>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {item.memo && <div><label className="text-[11px] text-gray-500 font-semibold mb-0.5 block">メモ</label><p className="text-xs bg-yellow-50 p-2 rounded border whitespace-pre-wrap">{item.memo}</p></div>}
-                  </div>
-                )}
               </div>
             ))}
           </div>
         )}
       </main>
 
-      <button onClick={() => handleOpenModal()} className="fixed bottom-6 right-6 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-20"><Plus size={28} /></button>
+      {/* Float Add Button */}
+      <button onClick={() => handleOpenModal()} className="fixed bottom-6 right-6 bg-blue-600 text-white w-14 h-14 rounded-full shadow-lg hover:bg-blue-700 hover:scale-105 active:scale-95 flex items-center justify-center z-20 transition-all"><Plus size={28} /></button>
 
+      {/* --- Detail Popup Modal --- */}
+      {isDetailModalOpen && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg flex flex-col max-h-[90vh]">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-t-2xl">
+              <div className="flex items-center gap-2 min-w-0 pr-4">
+                {/* 見出し M (24px), Bold */}
+                <h2 className="text-[24px] font-bold text-gray-900 truncate">{selectedItem.serviceName}</h2>
+                <span className="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-600 border border-blue-100 font-medium flex-shrink-0">{selectedItem.category}</span>
+              </div>
+              <button onClick={handleCloseDetailModal} className="text-gray-400 hover:text-gray-600 transition-colors p-1"><X size={24} /></button>
+            </div>
+            
+            {/* Scrollable Content */}
+            <div className="p-6 overflow-y-auto space-y-5">
+              {/* ID / Login Field */}
+              <div className="space-y-1.5">
+                {/* 本文 S (14px), Medium (Label) */}
+                <label className="text-[14px] font-medium text-gray-400">ID / メールアドレス</label>
+                <div className="flex items-center justify-between bg-gray-50 px-3 py-2.5 rounded-xl border border-gray-100">
+                  {/* 本文 M (16px), Medium */}
+                  <span className="text-[16px] font-medium text-gray-800 truncate font-mono select-all pr-2">{selectedItem.loginId || '未設定'}</span>
+                  {selectedItem.loginId && (
+                    <button onClick={() => copyToClipboard(selectedItem.loginId, `detail-id`)} className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-white rounded-lg transition-all">
+                      {copiedField === `detail-id` ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Password Field */}
+              <div className="space-y-1.5">
+                {/* 本文 S (14px), Medium */}
+                <label className="text-[14px] font-medium text-gray-400">パスワード</label>
+                <div className="flex items-center justify-between bg-gray-50 px-3 py-2.5 rounded-xl border border-gray-100">
+                  {/* 本文 M (16px), Medium */}
+                  <input 
+                    type={showPasswordMap['detail-pass'] ? "text" : "password"} 
+                    value={selectedItem.password || ''} 
+                    readOnly 
+                    className="bg-transparent text-[16px] font-medium text-gray-800 font-mono outline-none w-full" 
+                  />
+                  {selectedItem.password && (
+                    <div className="flex items-center gap-1 border-l border-gray-200 pl-2">
+                      <button onClick={() => togglePasswordVisibility('detail-pass')} className="text-gray-400 hover:text-gray-600 p-1.5 hover:bg-white rounded-lg transition-all">
+                        {showPasswordMap['detail-pass'] ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                      <button onClick={() => copyToClipboard(selectedItem.password, `detail-pass`)} className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-white rounded-lg transition-all">
+                        {copiedField === `detail-pass` ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Custom Fields */}
+              {selectedItem.customFields && selectedItem.customFields.length > 0 && (
+                <div className="space-y-4 pt-3 border-t border-gray-100">
+                  <h3 className="text-[14px] font-bold text-gray-800">追加情報</h3>
+                  <div className="grid grid-cols-1 gap-3.5">
+                    {selectedItem.customFields.map((field, idx) => (
+                      <div key={idx} className="space-y-1">
+                        <span className="text-[14px] font-medium text-gray-400">{field.label || 'カスタム項目'}</span>
+                        <div className="flex items-center justify-between bg-gray-50 px-3 py-2.5 rounded-xl border border-gray-100">
+                          {field.isSecret ? (
+                            <input 
+                              type={showPasswordMap[`detail-custom-${idx}`] ? "text" : "password"} 
+                              value={field.value || ''} 
+                              readOnly 
+                              className="bg-transparent text-[16px] font-medium text-gray-800 font-mono outline-none w-full" 
+                            />
+                          ) : (
+                            <span className="text-[16px] font-medium text-gray-800 truncate select-all pr-2">{field.value || '-'}</span>
+                          )}
+                          {field.value && (
+                            <div className="flex items-center gap-1 border-l border-gray-200 pl-2">
+                              {field.isSecret && (
+                                <button onClick={() => togglePasswordVisibility(`detail-custom-${idx}`)} className="text-gray-400 hover:text-gray-600 p-1.5 hover:bg-white rounded-lg transition-all">
+                                  {showPasswordMap[`detail-custom-${idx}`] ? <EyeOff size={16} /> : <Eye size={16} />}
+                                </button>
+                              )}
+                              <button onClick={() => copyToClipboard(field.value, `detail-custom-${idx}`)} className="text-gray-400 hover:text-blue-600 p-1.5 hover:bg-white rounded-lg transition-all">
+                                {copiedField === `detail-custom-${idx}` ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Memo */}
+              {selectedItem.memo && (
+                <div className="space-y-1.5 pt-3 border-t border-gray-100">
+                  <label className="text-[14px] font-medium text-gray-400">メモ</label>
+                  <p className="text-[14px] font-medium text-gray-700 bg-yellow-50/50 p-3.5 rounded-xl border border-yellow-100 whitespace-pre-wrap leading-relaxed">{selectedItem.memo}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer containing Edit, Delete, Close */}
+            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex justify-between items-center">
+              {/* Delete Trigger Button (Left) */}
+              <button 
+                onClick={handleDeleteTrigger} 
+                className="flex items-center gap-1.5 px-4 py-2 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-xl text-[14px] font-medium transition-colors"
+              >
+                <Trash2 size={16} />削除
+              </button>
+
+              {/* Edit and Close Buttons (Right) */}
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={handleCloseDetailModal} 
+                  className="px-4 py-2 text-[14px] font-medium text-gray-500 hover:bg-gray-100 rounded-xl transition-all"
+                >
+                  閉じる
+                </button>
+                <button 
+                  onClick={handleEditFromDetail} 
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-[14px] font-medium transition-all shadow-sm shadow-blue-100"
+                >
+                  <Edit2 size={16} />編集する
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Safe Custom Delete Confirmation Overlaid Modal --- */}
+      {isDeleteConfirmOpen && selectedItem && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <h3 className="text-[20px] font-bold text-gray-900 leading-tight">本当に削除しますか？</h3>
+            <p className="text-[14px] font-medium text-gray-500 leading-relaxed">
+              「{selectedItem.serviceName}」に関する保存情報を永久に削除します。この操作は取り消せません。
+            </p>
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button 
+                onClick={() => setIsDeleteConfirmOpen(false)} 
+                className="px-4 py-2 text-[14px] font-medium text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                キャンセル
+              </button>
+              <button 
+                onClick={handleConfirmDelete} 
+                className="px-4 py-2 text-[14px] font-medium bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors shadow-sm"
+              >
+                完全に削除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- Add / Edit Form Modal --- */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
-            <div className="px-6 py-4 border-b flex justify-between items-center bg-gray-50">
-              <h2 className="text-xl font-bold">{editingId ? '情報の編集' : '新規追加'}</h2>
-              <button onClick={handleCloseModal} className="text-gray-400"><X size={24} /></button>
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h2 className="text-[20px] font-bold text-gray-900">{editingId ? '情報の編集' : '新規情報の登録'}</h2>
+              <button onClick={handleCloseModal} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={24} /></button>
             </div>
-            <div className="p-6 overflow-y-auto">
+            <div className="p-6 overflow-y-auto space-y-4">
               <form id="password-form" onSubmit={handleSave} className="space-y-4">
-                <div><label className="block text-sm font-medium mb-1">サービス名 *</label><input type="text" name="serviceName" value={formData.serviceName} onChange={handleChange} required className="w-full px-3 py-2 border rounded focus:ring-1 outline-none text-sm" /></div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">カテゴリー</label>
+                  <label className="block text-[14px] font-medium text-gray-700 mb-1">サービス名 *</label>
+                  <input type="text" name="serviceName" value={formData.serviceName} onChange={handleChange} required className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-100 focus:border-blue-500 outline-none text-[14px] font-medium transition-all" />
+                </div>
+                <div>
+                  <label className="block text-[14px] font-medium text-gray-700 mb-1">カテゴリー</label>
                   {isNewCategoryInput ? (
-                    <div className="flex gap-2"><input type="text" value={formData.category} onChange={handleChange} name="category" placeholder="新しいカテゴリー" className="flex-1 px-3 py-2 border rounded text-sm" autoFocus /><button type="button" onClick={() => { setIsNewCategoryInput(false); setFormData(prev => ({...prev, category: '個人用'})) }} className="text-xs text-gray-500">キャンセル</button></div>
+                    <div className="flex gap-2">
+                      <input type="text" value={formData.category} onChange={handleChange} name="category" placeholder="新しいカテゴリー" className="flex-1 px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium" autoFocus />
+                      <button type="button" onClick={() => { setIsNewCategoryInput(false); setFormData(prev => ({...prev, category: '個人用'})) }} className="text-[12px] font-medium text-gray-400 hover:text-gray-600">キャンセル</button>
+                    </div>
                   ) : (
-                    <select name="category" value={formData.category} onChange={handleCategorySelect} className="w-full px-3 py-2 border rounded text-sm">
+                    <select name="category" value={formData.category} onChange={handleCategorySelect} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium bg-white">
                       {allCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                       <option disabled>──────────</option>
                       <option value="__NEW__">＋ 新規追加...</option>
                     </select>
                   )}
                 </div>
-                <div><label className="block text-sm font-medium mb-1">ID / メール</label><input type="text" name="loginId" value={formData.loginId} onChange={handleChange} className="w-full px-3 py-2 border rounded text-sm font-mono" /></div>
                 <div>
-                  <label className="block text-sm font-medium mb-1">パスワード</label>
+                  <label className="block text-[14px] font-medium text-gray-700 mb-1">ID / メールアドレス</label>
+                  <input type="text" name="loginId" value={formData.loginId} onChange={handleChange} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium font-mono" />
+                </div>
+                <div>
+                  <label className="block text-[14px] font-medium text-gray-700 mb-1">パスワード</label>
                   <div className="relative">
-                    <input type={showPasswordMap['form'] ? "text" : "password"} name="password" value={formData.password} onChange={handleChange} className="w-full pl-3 pr-10 py-2 border rounded text-sm font-mono" />
-                    <button type="button" onClick={() => togglePasswordVisibility('form')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 p-1">{showPasswordMap['form'] ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+                    <input type={showPasswordMap['form'] ? "text" : "password"} name="password" value={formData.password} onChange={handleChange} className="w-full pl-3 pr-10 py-2 border border-gray-200 rounded-xl text-[14px] font-medium font-mono" />
+                    <button type="button" onClick={() => togglePasswordVisibility('form')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 p-1">{showPasswordMap['form'] ? <EyeOff size={16} /> : <Eye size={16} />}</button>
                   </div>
                 </div>
-                <div className="space-y-2 pt-2 border-t">
-                  <div className="flex justify-between items-center"><label className="text-sm font-medium">追加項目</label><button type="button" onClick={handleAddCustomField} className="text-xs text-blue-600 flex items-center"><Plus size={14} />追加</button></div>
+
+                {/* Custom Fields Implementation */}
+                <div className="space-y-2 pt-3 border-t border-gray-100">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[14px] font-bold text-gray-800">追加項目</label>
+                    <button type="button" onClick={handleAddCustomField} className="text-[12px] font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1">＋ 項目を追加</button>
+                  </div>
                   {formData.customFields && formData.customFields.map((field, index) => (
-                    <div key={index} className="flex flex-col gap-2 bg-gray-50 p-2.5 rounded border">
+                    <div key={index} className="flex flex-col gap-2 bg-gray-50 p-3 rounded-xl border border-gray-200 relative">
                       <div className="flex items-center gap-2">
-                        <input type="text" placeholder="項目名" value={field.label} onChange={(e) => handleCustomFieldChange(index, 'label', e.target.value)} className="flex-1 px-2 py-1.5 border rounded text-sm" />
-                        <label className="flex items-center text-xs gap-1"><input type="checkbox" checked={field.isSecret || false} onChange={(e) => handleCustomFieldChange(index, 'isSecret', e.target.checked)} />隠す</label>
-                        <button type="button" onClick={() => handleRemoveCustomField(index)} className="text-red-400"><Trash2 size={16}/></button>
+                        <input type="text" placeholder="項目名 (例: 秘密の質問)" value={field.label} onChange={(e) => handleCustomFieldChange(index, 'label', e.target.value)} className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-[13px] font-medium bg-white" />
+                        <label className="flex items-center text-[12px] font-medium text-gray-500 gap-1 select-none">
+                          <input type="checkbox" checked={field.isSecret || false} onChange={(e) => handleCustomFieldChange(index, 'isSecret', e.target.checked)} className="rounded text-blue-600 focus:ring-blue-100" />
+                          隠す
+                        </label>
+                        <button type="button" onClick={() => handleRemoveCustomField(index)} className="text-gray-400 hover:text-red-500 p-1"><Trash2 size={16}/></button>
                       </div>
                       <div className="relative">
-                        <input type={field.isSecret && !showPasswordMap[`form-custom-${index}`] ? "password" : "text"} placeholder="値" value={field.value} onChange={(e) => handleCustomFieldChange(index, 'value', e.target.value)} className={`w-full px-2 py-1.5 border rounded text-sm ${field.isSecret ? 'font-mono' : ''}`} />
-                        {field.isSecret && <button type="button" onClick={() => togglePasswordVisibility(`form-custom-${index}`)} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400">{showPasswordMap[`form-custom-${index}`] ? <EyeOff size={14} /> : <Eye size={14} />}</button>}
+                        <input type={field.isSecret && !showPasswordMap[`form-custom-${index}`] ? "password" : "text"} placeholder="登録する値" value={field.value} onChange={(e) => handleCustomFieldChange(index, 'value', e.target.value)} className={`w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-[13px] font-medium bg-white ${field.isSecret ? 'font-mono' : ''}`} />
+                        {field.isSecret && (
+                          <button type="button" onClick={() => togglePasswordVisibility(`form-custom-${index}`)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400">
+                            {showPasswordMap[`form-custom-${index}`] ? <EyeOff size={14} /> : <Eye size={14} />}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
-                <div><label className="block text-sm font-medium mb-1">メモ</label><textarea name="memo" value={formData.memo} onChange={handleChange} rows="2" className="w-full px-3 py-2 border rounded text-sm resize-none"></textarea></div>
+
+                <div>
+                  <label className="block text-[14px] font-medium text-gray-700 mb-1">メモ</label>
+                  <textarea name="memo" value={formData.memo} onChange={handleChange} rows="2" className="w-full px-3 py-2 border border-gray-200 rounded-xl text-[14px] font-medium resize-none"></textarea>
+                </div>
               </form>
             </div>
-            <div className="px-5 py-3 border-t bg-gray-50 flex justify-end gap-3">
-              <button type="button" onClick={handleCloseModal} className="px-4 py-1.5 text-sm text-gray-600">キャンセル</button>
-              <button type="submit" form="password-form" className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded">保存する</button>
+            <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end gap-3 rounded-b-2xl">
+              <button type="button" onClick={handleCloseModal} className="px-4 py-2 text-[14px] font-medium text-gray-600 hover:bg-gray-100 rounded-xl">キャンセル</button>
+              <button type="submit" form="password-form" className="px-5 py-2 text-[14px] font-medium bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm">保存する</button>
             </div>
           </div>
         </div>
